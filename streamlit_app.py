@@ -290,7 +290,6 @@ elif st.session_state.app_mode == 'load':
             st.stop()
             
         wybrany_event = st.selectbox("Wybierz Event:", st.session_state.events_list)
-        
         dostepne_auta = st.session_state.fleet_db[st.session_state.fleet_db['Event'] == wybrany_event]['Naczepa'].tolist()
         
         if not dostepne_auta:
@@ -298,61 +297,59 @@ elif st.session_state.app_mode == 'load':
             st.stop()
             
         wybrana_naczepa = st.selectbox("Wybierz Auto:", dostepne_auta)
-        
         df_projekty_eventu = st.session_state.projects_db[st.session_state.projects_db['Event'] == wybrany_event]
         dynamiczna_lista_projektow = ["Brak", "MIX - Drobnica"] + [f"{row['ID']} - {row['Nazwa']}" for _, row in df_projekty_eventu.iterrows()]
-        
         df_current_auto = st.session_state.cargo_db[(st.session_state.cargo_db['Event'] == wybrany_event) & (st.session_state.cargo_db['Naczepa'] == wybrana_naczepa)]
         
         st.markdown("---")
         st.markdown("<h3 style='color: white !important;'>⚡ KREATOR RZĘDU</h3>", unsafe_allow_html=True)
         
-        with st.form("add_row_form", clear_on_submit=True):
-            rzad = st.number_input("Rząd (od kabiny):", min_value=1, max_value=15, value=len(df_current_auto)+1)
-            uklad = st.selectbox("Szablon Układu:", uklady_lista)
-            
+        # --- USUNIĘTY ST.FORM! Teraz interfejs jest w pełni dynamiczny! ---
+        rzad = st.number_input("Rząd (od kabiny):", min_value=1, max_value=15, value=len(df_current_auto)+1)
+        uklad = st.selectbox("Szablon Układu:", uklady_lista)
+        
+        st.markdown("---")
+        p1 = st.selectbox("Projekt Główny / Lewy / Dół:", dynamiczna_lista_projektow)
+        zaw1 = st.multiselect("📦 Wybierz typy sprzętu (P1):", kategorie_sprzetu)
+        
+        z1_dict = {}
+        if zaw1:
+            st.caption("Podaj ilość skrzyń/sztuk dla P1:")
+            cols1 = st.columns(min(len(zaw1), 4))
+            for i, item in enumerate(zaw1):
+                z1_dict[item] = cols1[i % 4].number_input(f"{item}", min_value=1, value=1, step=1, key=f"q1_{item}")
+        
+        if "Pełny" not in uklad:
             st.markdown("---")
-            p1 = st.selectbox("Projekt Główny / Lewy / Dół:", dynamiczna_lista_projektow)
-            zaw1 = st.multiselect("📦 Wybierz typy sprzętu (P1):", kategorie_sprzetu)
+            p2 = st.selectbox("Projekt Dodatkowy / Prawy / Góra:", dynamiczna_lista_projektow)
+            zaw2 = st.multiselect("📦 Wybierz typy sprzętu (P2):", kategorie_sprzetu)
             
-            z1_dict = {}
-            if zaw1:
-                st.caption("Podaj ilość skrzyń/sztuk:")
-                cols1 = st.columns(min(len(zaw1), 4))
-                for i, item in enumerate(zaw1):
-                    z1_dict[item] = cols1[i % 4].number_input(f"{item}", min_value=1, value=1, step=1, key=f"q1_{item}")
-            
-            if "Pełny" not in uklad:
-                st.markdown("---")
-                p2 = st.selectbox("Projekt Dodatkowy / Prawy / Góra:", dynamiczna_lista_projektow)
-                zaw2 = st.multiselect("📦 Wybierz typy sprzętu (P2):", kategorie_sprzetu)
-                
-                z2_dict = {}
-                if zaw2:
-                    st.caption("Podaj ilość skrzyń/sztuk:")
-                    cols2 = st.columns(min(len(zaw2), 4))
-                    for i, item in enumerate(zaw2):
-                        z2_dict[item] = cols2[i % 4].number_input(f"{item}", min_value=1, value=1, step=1, key=f"q2_{item}")
-            else:
-                p2, z2_dict = "Brak", {}
+            z2_dict = {}
+            if zaw2:
+                st.caption("Podaj ilość skrzyń/sztuk dla P2:")
+                cols2 = st.columns(min(len(zaw2), 4))
+                for i, item in enumerate(zaw2):
+                    z2_dict[item] = cols2[i % 4].number_input(f"{item}", min_value=1, value=1, step=1, key=f"q2_{item}")
+        else:
+            p2, z2_dict = "Brak", {}
 
-            st.markdown("---")
-            uwagi = st.text_input("Uwagi (opcjonalnie):", placeholder="np. Wózek z boku")
+        st.markdown("---")
+        uwagi = st.text_input("Uwagi (opcjonalnie):", placeholder="np. Wózek z boku")
+        
+        if st.button("🔽 DODAJ DO NACZEPY", use_container_width=True):
+            z1_text = ", ".join([f"{k}: {v}" for k, v in z1_dict.items()]) if z1_dict else "Nie określono"
+            z2_text = ", ".join([f"{k}: {v}" for k, v in z2_dict.items()]) if z2_dict else "Nie określono"
             
-            if st.form_submit_button("🔽 DODAJ DO NACZEPY", use_container_width=True):
-                z1_text = ", ".join([f"{k}: {v}" for k, v in z1_dict.items()]) if z1_dict else "Nie określono"
-                z2_text = ", ".join([f"{k}: {v}" for k, v in z2_dict.items()]) if z2_dict else "Nie określono"
-                
-                nowe_dane = pd.DataFrame([{
-                    'Event': wybrany_event, 'Naczepa': wybrana_naczepa, 
-                    'Rząd': rzad, 'Układ': uklad, 
-                    'Projekt_1': p1, 'Zawartosc_1': z1_text, 
-                    'Projekt_2': p2, 'Zawartosc_2': z2_text, 
-                    'Uwagi': uwagi
-                }])
-                st.session_state.cargo_db = pd.concat([st.session_state.cargo_db, nowe_dane], ignore_index=True)
-                sync_to_google_sheets()
-                st.rerun()
+            nowe_dane = pd.DataFrame([{
+                'Event': wybrany_event, 'Naczepa': wybrana_naczepa, 
+                'Rząd': rzad, 'Układ': uklad, 
+                'Projekt_1': p1, 'Zawartosc_1': z1_text, 
+                'Projekt_2': p2, 'Zawartosc_2': z2_text, 
+                'Uwagi': uwagi
+            }])
+            st.session_state.cargo_db = pd.concat([st.session_state.cargo_db, nowe_dane], ignore_index=True)
+            sync_to_google_sheets()
+            st.rerun()
 
         if not df_current_auto.empty:
             if st.button("↩️ COFNIJ OSTATNI RZĄD", use_container_width=True):
