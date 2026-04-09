@@ -27,9 +27,7 @@ st.markdown("""
     h1, h2, h3 { color: #38bdf8 !important; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
     
     /* GIGANTYCZNE PRZYCISKI MENU GŁÓWNEGO */
-    .btn-menu-container {
-        display: flex; gap: 20px; justify-content: center; margin-top: 50px;
-    }
+    .btn-menu-container { display: flex; gap: 20px; justify-content: center; margin-top: 50px; }
     
     div[data-testid="metric-container"] {
         background-color: #1e293b !important; border-left: 5px solid #38bdf8 !important;
@@ -54,9 +52,8 @@ st.markdown("""
 # ==========================================
 # 2. STAN APLIKACJI I BAZA DANYCH
 # ==========================================
-# Inicjalizacja routingu (Menu Główne to domyślny widok)
 if 'app_mode' not in st.session_state:
-    st.session_state.app_mode = 'menu' # 'menu', 'load', 'unload'
+    st.session_state.app_mode = 'menu' 
 
 if 'cargo_db' not in st.session_state:
     st.session_state.cargo_db = pd.DataFrame(columns=[
@@ -76,7 +73,7 @@ kolory_skrzyn = {
 }
 
 # ==========================================
-# 3. SILNIK RENDEROWANIA 3D (Wspólny dla obu trybów)
+# 3. SILNIK RENDEROWANIA 3D
 # ==========================================
 def render_3d_trailer(df_current_auto):
     fig3d = go.Figure()
@@ -108,12 +105,12 @@ def render_3d_trailer(df_current_auto):
             draw_block(fig3d, [0.05, W-0.05], [y_start, y_end], [0, H*0.4], c1, f"{opis}<br>Dół: {p1}")
             if p2 != "Brak": draw_block(fig3d, [0.05, W-0.05], [y_start, y_end], [H*0.4+0.05, H*0.8], c2, f"{opis}<br>Góra: {p2}")
 
-    fig3d.update_layout(scene=dict(aspectmode='data', xaxis=dict(visible=False), yaxis=dict(visible=False), zaxis=dict(visible=False), camera=dict(eye=dict(x=-2.2, y=-1.8, z=1.0))), margin=dict(l=0, r=0, t=0, b=0), height=650, showlegend=False, paper_bgcolor='rgba(0,0,0,0)')
+    fig3d.update_layout(scene=dict(aspectmode='data', xaxis=dict(visible=False), yaxis=dict(visible=False), zaxis=dict(visible=False), camera=dict(eye=dict(x=-2.2, y=-1.8, z=1.0))), margin=dict(l=0, r=0, t=0, b=0), height=600, showlegend=False, paper_bgcolor='rgba(0,0,0,0)')
     return fig3d
 
 
 # ==========================================
-# 4. WIDOK: MENU GŁÓWNE (BRAMKA)
+# 4. WIDOK: MENU GŁÓWNE
 # ==========================================
 if st.session_state.app_mode == 'menu':
     st.markdown("<h1 style='text-align: center; font-size: 4rem; margin-top: 5vh;'>SQM TERMINAL</h1>", unsafe_allow_html=True)
@@ -146,10 +143,10 @@ elif st.session_state.app_mode == 'load':
         wybrany_event = st.selectbox("Wybierz Event:", eventy_lista)
         wybrana_naczepa = st.selectbox("Wybierz Auto:", flota_lista)
         
+        df_current_auto = st.session_state.cargo_db[(st.session_state.cargo_db['Event'] == wybrany_event) & (st.session_state.cargo_db['Naczepa'] == wybrana_naczepa)]
+        
         st.markdown("---")
         st.markdown("<h3 style='color: white !important;'>⚡ KREATOR RZĘDU</h3>", unsafe_allow_html=True)
-        
-        df_current_auto = st.session_state.cargo_db[(st.session_state.cargo_db['Event'] == wybrany_event) & (st.session_state.cargo_db['Naczepa'] == wybrana_naczepa)]
         
         with st.form("add_row_form", clear_on_submit=True):
             rzad = st.number_input("Rząd (od kabiny):", min_value=1, max_value=15, value=len(df_current_auto)+1)
@@ -163,7 +160,16 @@ elif st.session_state.app_mode == 'load':
                 st.session_state.cargo_db = pd.concat([st.session_state.cargo_db, nowe_dane], ignore_index=True)
                 st.rerun()
 
-        if st.button("🗑️ Wyczyść to auto", use_container_width=True):
+        # NOWOŚĆ 1: Szybkie Cofnięcie
+        if not df_current_auto.empty:
+            if st.button("↩️ COFNIJ OSTATNI RZĄD", use_container_width=True):
+                # Usunięcie ostatniego rekordu z globalnej bazy dla tego auta
+                ostatni_index = df_current_auto.index[-1]
+                st.session_state.cargo_db = st.session_state.cargo_db.drop(ostatni_index)
+                st.rerun()
+
+        st.markdown("---")
+        if st.button("🚨 Wyczyść całe auto", use_container_width=True):
             mask = ~((st.session_state.cargo_db['Event'] == wybrany_event) & (st.session_state.cargo_db['Naczepa'] == wybrana_naczepa))
             st.session_state.cargo_db = st.session_state.cargo_db[mask]
             st.rerun()
@@ -180,6 +186,32 @@ elif st.session_state.app_mode == 'load':
     
     st.plotly_chart(render_3d_trailer(df_current_auto), use_container_width=True)
 
+    # NOWOŚĆ 2: Zaawansowany Edytor Danych
+    with st.expander("🛠️ TRYB KOREKTY (Zmień szczegóły lub usuń wpisy z wnętrza naczepy)"):
+        st.info("Zmień dane bezpośrednio w komórkach tabeli poniżej. Aby usunąć konkretny wiersz, zaznacz go po lewej stronie i wciśnij klawisz 'Delete'. Na koniec kliknij ZAPISZ ZMIANY.")
+        
+        # Przygotowujemy tabelę bez kolumn kontekstowych, żeby nie można było ich popsuć
+        df_do_edycji = df_current_auto.drop(columns=['Event', 'Naczepa'])
+        
+        edited_df = st.data_editor(
+            df_do_edycji,
+            num_rows="dynamic", # Pozwala na dodawanie/usuwanie wierszy
+            use_container_width=True
+        )
+
+        if st.button("💾 ZAPISZ ZMIANY W BAZIE", type="primary"):
+            # Przywracamy schowane kolumny
+            edited_df['Event'] = wybrany_event
+            edited_df['Naczepa'] = wybrana_naczepa
+            
+            # Kasujemy stare dane dla tego auta i wstawiamy nowe (zedytowane)
+            mask = (st.session_state.cargo_db['Event'] == wybrany_event) & (st.session_state.cargo_db['Naczepa'] == wybrana_naczepa)
+            st.session_state.cargo_db = st.session_state.cargo_db[~mask]
+            st.session_state.cargo_db = pd.concat([st.session_state.cargo_db, edited_df], ignore_index=True)
+            
+            st.success("Zmiany zostały zapisane!")
+            st.rerun()
+
 # ==========================================
 # 6. WIDOK: TARGI (ROZŁADUNEK)
 # ==========================================
@@ -195,16 +227,13 @@ elif st.session_state.app_mode == 'unload':
         wybrana_naczepa = st.selectbox("Które auto rozładowujesz?:", flota_lista)
         
         st.markdown("---")
-        st.info("Tryb Odczytu (Read-Only). W tym trybie nie możesz modyfikować zawartości naczepy.")
+        st.info("Tryb Read-Only. W tym trybie nie możesz modyfikować zawartości naczepy.")
 
-    # --- Ekran Główny Rozładunku ---
     df_current_auto = st.session_state.cargo_db[(st.session_state.cargo_db['Event'] == wybrany_event) & (st.session_state.cargo_db['Naczepa'] == wybrana_naczepa)]
     st.title(f"📥 ROZŁADUNEK | {wybrana_naczepa}")
     
-    # 3D Bliźniak
     st.plotly_chart(render_3d_trailer(df_current_auto), use_container_width=True)
     
-    # Tabela (CZYSTA - tylko to co potrzebne na placu)
     st.markdown("### 📋 MANIFEST ROZŁADUNKOWY (LIFO)")
     if not df_current_auto.empty:
         kolumny_do_tabeli = ['Rząd', 'Układ', 'Projekt_1', 'Projekt_2', 'Uwagi']
