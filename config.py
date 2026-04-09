@@ -14,5 +14,6 @@ UKLADY_LISTA = [
 KATEGORIE_SPRZETU = [
     "Dioda", "Kablarki", "TV", "Procesory", "Rozdzielnie", "Monitory", "Głośniki", 
     "Wzmacniacze", "Lampy", "Krata", "Drabiny", "Rusztowanie", "Szary plastik. Box", 
-    "Niebieski Plastik box", "Kartony", "Statywy", "LAN", "Narzędziówka", "PC", "Gravity", "Paleta", "TRAP"
+    "Niebieski Plastik box", "Kartony", "Statywy", "LAN", "Narzędziówka", "PC", 
+    "Gravity", "Paleta", "TRAP"
 ]
