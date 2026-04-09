@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from streamlit_gsheets import GSheetsConnection
+import random
 
 # ==========================================
 # 1. KONFIGURACJA STRONY I STYLIZACJA PRO
@@ -76,17 +77,16 @@ def sync_to_google_sheets():
 # 3. SŁOWNIKI BAZOWE (BIURO)
 # ==========================================
 if 'events_list' not in st.session_state:
-    st.session_state.events_list = ["Hannover Messe 2026", "ISE Barcelona 2026"]
+    st.session_state.events_list = []
 
-if 'fleet_list' not in st.session_state:
-    st.session_state.fleet_list = ["PO 1234A (Mega)", "WA 9876C (Standard)", "KR 5555X (Standard)"]
+if 'fleet_db' not in st.session_state:
+    st.session_state.fleet_db = pd.DataFrame(columns=["Event", "Naczepa"])
 
 if 'projects_db' not in st.session_state:
-    st.session_state.projects_db = pd.DataFrame([
-        {"Event": "Hannover Messe 2026", "ID": "21374", "Nazwa": "Hannover Główny", "Kolor": "#0ea5e9"},
-        {"Event": "Hannover Messe 2026", "ID": "21375", "Nazwa": "Stoisko BMW", "Kolor": "#f59e0b"},
-        {"Event": "ISE Barcelona 2026", "ID": "24001", "Nazwa": "Samsung", "Kolor": "#ef4444"}
-    ])
+    st.session_state.projects_db = pd.DataFrame(columns=["Event", "ID", "Nazwa", "Kolor"])
+
+PALETA_KOLOROW = ["#ef4444", "#f97316", "#f59e0b", "#84cc16", "#22c55e", "#10b981", 
+                  "#06b6d4", "#0ea5e9", "#3b82f6", "#6366f1", "#8b5cf6", "#d946ef", "#f43f5e"]
 
 uklady_lista = ["🟩 Pełny rząd (1 Projekt)", "🔲 Podzielony: Lewa / Prawa", "🟰 Piętrowany: Dół / Góra"]
 
@@ -123,7 +123,6 @@ def aggregate_equipment(df_auto):
                             pass
     if summary:
         df_sum = pd.DataFrame(summary)
-        # Grupowanie i sumowanie
         df_grouped = df_sum.groupby(["Projekt", "Sprzęt"])["Ilość skrzyń"].sum().reset_index()
         return df_grouped
     return pd.DataFrame(columns=["Projekt", "Sprzęt", "Ilość skrzyń"])
@@ -151,7 +150,6 @@ def render_3d_trailer(df_current_auto):
 
     def format_zawartosc_3d(zaw):
         if zaw == "Nie określono" or not zaw: return ""
-        # Uproszczenie wyświetlania w 3D, by nie robić śmietnika tekstowego
         items = zaw.split(", ")
         if len(items) > 2:
             return f"📦 {items[0]}, {items[1]}..."
@@ -222,27 +220,53 @@ elif st.session_state.app_mode == 'admin':
             if cols[1].button("Usuń", key=f"del_ev_{ev}"): st.session_state.events_list.remove(ev); st.rerun()
 
     with tab2:
-        nowe_auto = st.text_input("Dodaj Auto (Rejestracja):")
-        if st.button("➕ Dodaj Auto") and nowe_auto:
-            if nowe_auto not in st.session_state.fleet_list: st.session_state.fleet_list.append(nowe_auto); st.rerun()
-        st.markdown("### Aktualna Flota:")
-        for auto in st.session_state.fleet_list:
-            cols = st.columns([4, 1])
-            cols[0].write(f"- {auto}")
-            if cols[1].button("Usuń", key=f"del_auto_{auto}"): st.session_state.fleet_list.remove(auto); st.rerun()
+        if not st.session_state.events_list:
+            st.warning("Najpierw dodaj Event w zakładce obok!")
+        else:
+            wybrany_event_flota = st.selectbox("Wybierz Event dla dodawanych aut:", st.session_state.events_list, key="biuro_ev_flota")
+            nowe_auto = st.text_input("Dodaj Auto (Rejestracja / Opis):")
+            
+            if st.button("➕ Dodaj Auto do Eventu") and nowe_auto:
+                czy_istnieje = ((st.session_state.fleet_db['Event'] == wybrany_event_flota) & 
+                                (st.session_state.fleet_db['Naczepa'] == nowe_auto)).any()
+                if not czy_istnieje:
+                    nowe_dane = pd.DataFrame([{"Event": wybrany_event_flota, "Naczepa": nowe_auto}])
+                    st.session_state.fleet_db = pd.concat([st.session_state.fleet_db, nowe_dane], ignore_index=True)
+                    st.rerun()
+            
+            st.markdown(f"### Flota dla: {wybrany_event_flota}")
+            flota_aktualna = st.session_state.fleet_db[st.session_state.fleet_db['Event'] == wybrany_event_flota]
+            
+            if flota_aktualna.empty:
+                st.info("Brak przypisanych aut.")
+            else:
+                for idx, row in flota_aktualna.iterrows():
+                    cols = st.columns([4, 1])
+                    cols[0].write(f"- {row['Naczepa']}")
+                    if cols[1].button("Usuń", key=f"del_auto_{idx}"): 
+                        st.session_state.fleet_db = st.session_state.fleet_db.drop(idx)
+                        st.rerun()
 
     with tab3:
         with st.form("dodaj_projekt", clear_on_submit=True):
-            colA, colB, colC = st.columns(3)
-            p_event = colA.selectbox("Przypisz do Eventu:", st.session_state.events_list)
+            colA, colB = st.columns(2)
+            if not st.session_state.events_list:
+                st.warning("Dodaj Event w pierwszej zakładce!")
+                p_event = colA.selectbox("Przypisz do Eventu:", ["Brak"])
+            else:
+                p_event = colA.selectbox("Przypisz do Eventu:", st.session_state.events_list)
+                
             p_id = colB.text_input("ID Projektu (5 cyfr):")
-            p_nazwa = colC.text_input("Nazwa Projektu:")
-            p_kolor = st.color_picker("Wybierz kolor identyfikacyjny w 3D:", "#0ea5e9")
+            p_nazwa = st.text_input("Nazwa Projektu:")
             
             if st.form_submit_button("💾 Zapisz Projekt w Bazie"):
-                nowy_proj = pd.DataFrame([{"Event": p_event, "ID": p_id, "Nazwa": p_nazwa, "Kolor": p_kolor}])
-                st.session_state.projects_db = pd.concat([st.session_state.projects_db, nowy_proj], ignore_index=True)
-                st.rerun()
+                if p_event != "Brak" and p_id and p_nazwa:
+                    p_kolor = random.choice(PALETA_KOLOROW)
+                    nowy_proj = pd.DataFrame([{"Event": p_event, "ID": p_id, "Nazwa": p_nazwa, "Kolor": p_kolor}])
+                    st.session_state.projects_db = pd.concat([st.session_state.projects_db, nowy_proj], ignore_index=True)
+                    st.rerun()
+                else:
+                    st.error("Wypełnij wszystkie pola!")
                 
         st.markdown("### Aktualna Baza Projektów")
         edited_projects = st.data_editor(st.session_state.projects_db, num_rows="dynamic", use_container_width=True)
@@ -260,8 +284,20 @@ elif st.session_state.app_mode == 'load':
         
         st.markdown("---")
         st.markdown("<h3 style='color: white !important;'>📍 KONTEKST</h3>", unsafe_allow_html=True)
+        
+        if not st.session_state.events_list:
+            st.warning("Brak zdefiniowanych Eventów. Skonfiguruj biuro.")
+            st.stop()
+            
         wybrany_event = st.selectbox("Wybierz Event:", st.session_state.events_list)
-        wybrana_naczepa = st.selectbox("Wybierz Auto:", st.session_state.fleet_list)
+        
+        dostepne_auta = st.session_state.fleet_db[st.session_state.fleet_db['Event'] == wybrany_event]['Naczepa'].tolist()
+        
+        if not dostepne_auta:
+            st.warning("Brak aut przypisanych do tego Eventu. Dodaj je w Biurze.")
+            st.stop()
+            
+        wybrana_naczepa = st.selectbox("Wybierz Auto:", dostepne_auta)
         
         df_projekty_eventu = st.session_state.projects_db[st.session_state.projects_db['Event'] == wybrany_event]
         dynamiczna_lista_projektow = ["Brak", "MIX - Drobnica"] + [f"{row['ID']} - {row['Nazwa']}" for _, row in df_projekty_eventu.iterrows()]
@@ -279,7 +315,6 @@ elif st.session_state.app_mode == 'load':
             p1 = st.selectbox("Projekt Główny / Lewy / Dół:", dynamiczna_lista_projektow)
             zaw1 = st.multiselect("📦 Wybierz typy sprzętu (P1):", kategorie_sprzetu)
             
-            # --- NOWOŚĆ: DYNAMICZNE POLA ILOŚCI DLA P1 ---
             z1_dict = {}
             if zaw1:
                 st.caption("Podaj ilość skrzyń/sztuk:")
@@ -292,7 +327,6 @@ elif st.session_state.app_mode == 'load':
                 p2 = st.selectbox("Projekt Dodatkowy / Prawy / Góra:", dynamiczna_lista_projektow)
                 zaw2 = st.multiselect("📦 Wybierz typy sprzętu (P2):", kategorie_sprzetu)
                 
-                # --- NOWOŚĆ: DYNAMICZNE POLA ILOŚCI DLA P2 ---
                 z2_dict = {}
                 if zaw2:
                     st.caption("Podaj ilość skrzyń/sztuk:")
@@ -306,7 +340,6 @@ elif st.session_state.app_mode == 'load':
             uwagi = st.text_input("Uwagi (opcjonalnie):", placeholder="np. Wózek z boku")
             
             if st.form_submit_button("🔽 DODAJ DO NACZEPY", use_container_width=True):
-                # Sklejanie wyników do formatu "Dioda: 4, TV: 2"
                 z1_text = ", ".join([f"{k}: {v}" for k, v in z1_dict.items()]) if z1_dict else "Nie określono"
                 z2_text = ", ".join([f"{k}: {v}" for k, v in z2_dict.items()]) if z2_dict else "Nie określono"
                 
@@ -361,8 +394,20 @@ elif st.session_state.app_mode == 'unload':
         if st.button("🔙 WRÓĆ DO MENU", use_container_width=True): st.session_state.app_mode = 'menu'; st.rerun()
         st.markdown("---")
         st.markdown("<h3 style='color: white !important;'>📍 LOKALIZACJA</h3>", unsafe_allow_html=True)
+        
+        if not st.session_state.events_list:
+            st.warning("Brak Eventów.")
+            st.stop()
+            
         wybrany_event = st.selectbox("Gdzie jesteś?:", st.session_state.events_list)
-        wybrana_naczepa = st.selectbox("Które auto rozładowujesz?:", st.session_state.fleet_list)
+        
+        dostepne_auta = st.session_state.fleet_db[st.session_state.fleet_db['Event'] == wybrany_event]['Naczepa'].tolist()
+        if not dostepne_auta:
+            st.warning("Brak przypisanych aut dla tego Eventu.")
+            st.stop()
+            
+        wybrana_naczepa = st.selectbox("Które auto rozładowujesz?:", dostepne_auta)
+        
         st.markdown("---")
         st.info("Tryb Read-Only. W tym trybie nie możesz modyfikować zawartości naczepy.")
 
@@ -378,7 +423,6 @@ elif st.session_state.app_mode == 'unload':
         del st.session_state.cargo_db
         st.rerun()
         
-    # TRZY ZAKŁADKI DLA TECHNIKÓW
     tab_3d, tab_manifest, tab_podsumowanie = st.tabs(["🧊 WIZUALIZACJA 3D", "📋 MANIFEST (LIFO)", "📊 PODSUMOWANIE SPRZĘTU"])
     
     with tab_3d:
@@ -400,7 +444,6 @@ elif st.session_state.app_mode == 'unload':
             st.markdown("### Zsumowane ilości sprzętu na tej naczepie:")
             df_agregacja = aggregate_equipment(df_current_auto)
             if not df_agregacja.empty:
-                # Kolorujemy i formatujemy ładnie tabelkę przestawną
                 st.dataframe(
                     df_agregacja, 
                     use_container_width=True, 
