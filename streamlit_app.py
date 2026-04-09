@@ -18,15 +18,9 @@ st.markdown("""
     footer {visibility: hidden;}
     header {visibility: hidden;}
     
-    .stApp { 
-        background-color: #0f172a; 
-        color: #f8fafc; 
-        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
-    }
-    
+    .stApp { background-color: #0f172a; color: #f8fafc; font-family: 'Segoe UI', sans-serif; }
     h1, h2, h3 { color: #38bdf8 !important; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
     
-    /* GIGANTYCZNE PRZYCISKI MENU GŁÓWNEGO */
     .btn-menu-container { display: flex; gap: 20px; justify-content: center; margin-top: 50px; }
     
     div[data-testid="metric-container"] {
@@ -36,16 +30,14 @@ st.markdown("""
     div[data-testid="metric-container"] label { color: #94a3b8 !important; font-size: 1.1rem !important; }
     div[data-testid="metric-container"] div[data-testid="stMetricValue"] { color: #ffffff !important; font-weight: bold !important; }
     
-    /* Standardowe Przyciski */
-    div.stButton > button:first-child {
-        background-color: #0284c7; color: white; border: none; border-radius: 6px; font-weight: bold; transition: all 0.2s;
-        height: 50px;
-    }
+    div.stButton > button:first-child { background-color: #0284c7; color: white; border: none; border-radius: 6px; font-weight: bold; transition: all 0.2s; height: 50px; }
     div.stButton > button:first-child:hover { background-color: #38bdf8; color: #0f172a; }
     
-    /* Panel Boczny */
     section[data-testid="stSidebar"] { background-color: #1e293b !important; }
     section[data-testid="stSidebar"] label { color: #f8fafc !important; font-weight: 600 !important; }
+    
+    /* Zmiana koloru tagów w multiselect dla czytelności */
+    span[data-baseweb="tag"] { background-color: #0284c7 !important; color: white !important; border-radius: 4px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -55,9 +47,10 @@ st.markdown("""
 if 'app_mode' not in st.session_state:
     st.session_state.app_mode = 'menu' 
 
+# NOWOŚĆ: Dodane kolumny Zawartosc_1 i Zawartosc_2
 if 'cargo_db' not in st.session_state:
     st.session_state.cargo_db = pd.DataFrame(columns=[
-        'Event', 'Naczepa', 'Rząd', 'Układ', 'Projekt_1', 'Projekt_2', 'Uwagi'
+        'Event', 'Naczepa', 'Rząd', 'Układ', 'Projekt_1', 'Zawartosc_1', 'Projekt_2', 'Zawartosc_2', 'Uwagi'
     ])
 
 eventy_lista = ["Hannover Messe 2026", "ISE Barcelona 2026", "IFA Berlin"]
@@ -65,12 +58,15 @@ flota_lista = ["PO 1234A (Mega)", "WA 9876C (Standard)", "KR 5555X (Standard)"]
 projekty_lista = ["Brak", "21374 - Hannover", "24001 - Samsung", "24552 - Budimex", "MIX - Drobnica"]
 uklady_lista = ["🟩 Pełny rząd (1 Projekt)", "🔲 Podzielony: Lewa / Prawa", "🟰 Piętrowany: Dół / Góra"]
 
-kolory_skrzyn = {
-    '21374 - Hannover': '#0ea5e9',
-    '24001 - Samsung': '#ef4444', 
-    '24552 - Budimex': '#22c55e',  
-    'MIX - Drobnica': '#f59e0b'    
-}
+# NOWOŚĆ: Słownik sprzętu przepisany z kartki
+kategorie_sprzetu = [
+    "Dioda", "Kablarki", "TV", "Procesory", "Rozdzielnie", "Monitory", "Głośniki", 
+    "Wzmacniacze", "Lampy", "Krata", "Drabiny", "Rusztowanie", "Szary plastik. Box", 
+    "Niebieski Plastik box", "Kartony", "Statywy", "LAN", "Narzędziówka", "PC", 
+    "Gravity", "Paleta", "TRAP"
+]
+
+kolory_skrzyn = {'21374 - Hannover': '#0ea5e9', '24001 - Samsung': '#ef4444', '24552 - Budimex': '#22c55e', 'MIX - Drobnica': '#f59e0b'}
 
 # ==========================================
 # 3. SILNIK RENDEROWANIA 3D
@@ -93,17 +89,23 @@ def render_3d_trailer(df_current_auto):
     for idx, row in df_current_auto.iterrows():
         y_start = (row['Rząd'] - 1) * ROW_L
         y_end = row['Rząd'] * ROW_L - 0.05 
+        
         p1, p2 = row['Projekt_1'], row['Projekt_2']
+        z1, z2 = row['Zawartosc_1'], row['Zawartosc_2']
         c1, c2 = kolory_skrzyn.get(p1, '#64748b'), kolory_skrzyn.get(p2, '#64748b')
-        opis = f"<b>RZĄD {row['Rząd']}</b><br>Układ: {row['Układ']}<br>Uwagi: {row['Uwagi']}"
+        
+        opis_base = f"<b>RZĄD {row['Rząd']}</b><br>Układ: {row['Układ']}<br>Uwagi: {row['Uwagi']}"
+        info_1 = f"Projekt: {p1}<br>📦 Sprzęt: {z1}"
+        info_2 = f"Projekt: {p2}<br>📦 Sprzęt: {z2}"
 
-        if "Pełny" in row['Układ']: draw_block(fig3d, [0.05, W-0.05], [y_start, y_end], [0, H*0.8], c1, f"{opis}<br>Projekt: {p1}")
+        if "Pełny" in row['Układ']: 
+            draw_block(fig3d, [0.05, W-0.05], [y_start, y_end], [0, H*0.8], c1, f"{opis_base}<br>{info_1}")
         elif "Lewa / Prawa" in row['Układ']:
-            draw_block(fig3d, [0.05, W/2-0.05], [y_start, y_end], [0, H*0.8], c1, f"{opis}<br>Lewa: {p1}")
-            if p2 != "Brak": draw_block(fig3d, [W/2+0.05, W-0.05], [y_start, y_end], [0, H*0.8], c2, f"{opis}<br>Prawa: {p2}")
+            draw_block(fig3d, [0.05, W/2-0.05], [y_start, y_end], [0, H*0.8], c1, f"{opis_base}<br>[LEWA] {info_1}")
+            if p2 != "Brak": draw_block(fig3d, [W/2+0.05, W-0.05], [y_start, y_end], [0, H*0.8], c2, f"{opis_base}<br>[PRAWA] {info_2}")
         elif "Dół / Góra" in row['Układ']:
-            draw_block(fig3d, [0.05, W-0.05], [y_start, y_end], [0, H*0.4], c1, f"{opis}<br>Dół: {p1}")
-            if p2 != "Brak": draw_block(fig3d, [0.05, W-0.05], [y_start, y_end], [H*0.4+0.05, H*0.8], c2, f"{opis}<br>Góra: {p2}")
+            draw_block(fig3d, [0.05, W-0.05], [y_start, y_end], [0, H*0.4], c1, f"{opis_base}<br>[DÓŁ] {info_1}")
+            if p2 != "Brak": draw_block(fig3d, [0.05, W-0.05], [y_start, y_end], [H*0.4+0.05, H*0.8], c2, f"{opis_base}<br>[GÓRA] {info_2}")
 
     fig3d.update_layout(scene=dict(aspectmode='data', xaxis=dict(visible=False), yaxis=dict(visible=False), zaxis=dict(visible=False), camera=dict(eye=dict(x=-2.2, y=-1.8, z=1.0))), margin=dict(l=0, r=0, t=0, b=0), height=600, showlegend=False, paper_bgcolor='rgba(0,0,0,0)')
     return fig3d
@@ -115,28 +117,20 @@ def render_3d_trailer(df_current_auto):
 if st.session_state.app_mode == 'menu':
     st.markdown("<h1 style='text-align: center; font-size: 4rem; margin-top: 5vh;'>SQM TERMINAL</h1>", unsafe_allow_html=True)
     st.markdown("<h3 style='text-align: center; color: #94a3b8 !important;'>Wybierz profil autoryzacji</h3>", unsafe_allow_html=True)
-    
     st.markdown("<br><br>", unsafe_allow_html=True)
     col1, col2, col3, col4 = st.columns([1, 2, 2, 1])
-    
     with col2:
-        if st.button("📦 MAGAZYN (ZAŁADUNEK)", use_container_width=True):
-            st.session_state.app_mode = 'load'
-            st.rerun()
-            
+        if st.button("📦 MAGAZYN (ZAŁADUNEK)", use_container_width=True): st.session_state.app_mode = 'load'; st.rerun()
     with col3:
-        if st.button("📥 TARGI (ROZŁADUNEK)", use_container_width=True):
-            st.session_state.app_mode = 'unload'
-            st.rerun()
+        if st.button("📥 TARGI (ROZŁADUNEK)", use_container_width=True): st.session_state.app_mode = 'unload'; st.rerun()
+
 
 # ==========================================
 # 5. WIDOK: MAGAZYN (ZAŁADUNEK)
 # ==========================================
 elif st.session_state.app_mode == 'load':
     with st.sidebar:
-        if st.button("🔙 WRÓĆ DO MENU", use_container_width=True):
-            st.session_state.app_mode = 'menu'
-            st.rerun()
+        if st.button("🔙 WRÓĆ DO MENU", use_container_width=True): st.session_state.app_mode = 'menu'; st.rerun()
         
         st.markdown("---")
         st.markdown("<h3 style='color: white !important;'>📍 KONTEKST</h3>", unsafe_allow_html=True)
@@ -151,28 +145,42 @@ elif st.session_state.app_mode == 'load':
         with st.form("add_row_form", clear_on_submit=True):
             rzad = st.number_input("Rząd (od kabiny):", min_value=1, max_value=15, value=len(df_current_auto)+1)
             uklad = st.selectbox("Szablon Układu:", uklady_lista)
-            p1 = st.selectbox("Projekt Główny:", projekty_lista, index=1)
-            p2 = st.selectbox("Projekt Dodatkowy:", projekty_lista, index=0)
-            uwagi = st.text_input("Uwagi:", placeholder="np. Wózek z boku")
+            
+            # WARUNKOWE RENDEROWANIE (Conditional UI)
+            st.markdown("---")
+            p1 = st.selectbox("Projekt Główny / Lewy / Dół:", projekty_lista, index=1)
+            zaw1 = st.multiselect("📦 Sprzęt (P1):", kategorie_sprzetu, placeholder="Wybierz sprzęt...")
+            
+            # Pokazujemy drugą sekcję tylko jeśli użytkownik zadeklarował podział rzędu
+            if "Pełny" not in uklad:
+                st.markdown("---")
+                p2 = st.selectbox("Projekt Dodatkowy / Prawy / Góra:", projekty_lista, index=0)
+                zaw2 = st.multiselect("📦 Sprzęt (P2):", kategorie_sprzetu, placeholder="Wybierz sprzęt...")
+            else:
+                p2 = "Brak"
+                zaw2 = []
+
+            st.markdown("---")
+            uwagi = st.text_input("Uwagi (opcjonalnie):", placeholder="np. Wózek z boku")
             
             if st.form_submit_button("🔽 DODAJ DO NACZEPY", use_container_width=True):
-                nowe_dane = pd.DataFrame([{'Event': wybrany_event, 'Naczepa': wybrana_naczepa, 'Rząd': rzad, 'Układ': uklad, 'Projekt_1': p1, 'Projekt_2': p2 if "Pełny" not in uklad else "Brak", 'Uwagi': uwagi}])
+                # Zamieniamy listę sprzętów z multiselecta na ładny tekst po przecinku (np. "TV, Krata, Dioda")
+                z1_text = ", ".join(zaw1) if zaw1 else "Nie określono"
+                z2_text = ", ".join(zaw2) if zaw2 else "Nie określono"
+                
+                nowe_dane = pd.DataFrame([{
+                    'Event': wybrany_event, 'Naczepa': wybrana_naczepa, 'Rząd': rzad, 
+                    'Układ': uklad, 'Projekt_1': p1, 'Zawartosc_1': z1_text, 
+                    'Projekt_2': p2, 'Zawartosc_2': z2_text, 'Uwagi': uwagi
+                }])
                 st.session_state.cargo_db = pd.concat([st.session_state.cargo_db, nowe_dane], ignore_index=True)
                 st.rerun()
 
-        # NOWOŚĆ 1: Szybkie Cofnięcie
         if not df_current_auto.empty:
             if st.button("↩️ COFNIJ OSTATNI RZĄD", use_container_width=True):
-                # Usunięcie ostatniego rekordu z globalnej bazy dla tego auta
                 ostatni_index = df_current_auto.index[-1]
                 st.session_state.cargo_db = st.session_state.cargo_db.drop(ostatni_index)
                 st.rerun()
-
-        st.markdown("---")
-        if st.button("🚨 Wyczyść całe auto", use_container_width=True):
-            mask = ~((st.session_state.cargo_db['Event'] == wybrany_event) & (st.session_state.cargo_db['Naczepa'] == wybrana_naczepa))
-            st.session_state.cargo_db = st.session_state.cargo_db[mask]
-            st.rerun()
 
     # --- Ekran Główny Załadunku ---
     df_current_auto = st.session_state.cargo_db[(st.session_state.cargo_db['Event'] == wybrany_event) & (st.session_state.cargo_db['Naczepa'] == wybrana_naczepa)]
@@ -186,40 +194,24 @@ elif st.session_state.app_mode == 'load':
     
     st.plotly_chart(render_3d_trailer(df_current_auto), use_container_width=True)
 
-    # NOWOŚĆ 2: Zaawansowany Edytor Danych
     with st.expander("🛠️ TRYB KOREKTY (Zmień szczegóły lub usuń wpisy z wnętrza naczepy)"):
-        st.info("Zmień dane bezpośrednio w komórkach tabeli poniżej. Aby usunąć konkretny wiersz, zaznacz go po lewej stronie i wciśnij klawisz 'Delete'. Na koniec kliknij ZAPISZ ZMIANY.")
-        
-        # Przygotowujemy tabelę bez kolumn kontekstowych, żeby nie można było ich popsuć
         df_do_edycji = df_current_auto.drop(columns=['Event', 'Naczepa'])
-        
-        edited_df = st.data_editor(
-            df_do_edycji,
-            num_rows="dynamic", # Pozwala na dodawanie/usuwanie wierszy
-            use_container_width=True
-        )
-
+        edited_df = st.data_editor(df_do_edycji, num_rows="dynamic", use_container_width=True)
         if st.button("💾 ZAPISZ ZMIANY W BAZIE", type="primary"):
-            # Przywracamy schowane kolumny
-            edited_df['Event'] = wybrany_event
-            edited_df['Naczepa'] = wybrana_naczepa
-            
-            # Kasujemy stare dane dla tego auta i wstawiamy nowe (zedytowane)
+            edited_df['Event'] = wybrany_event; edited_df['Naczepa'] = wybrana_naczepa
             mask = (st.session_state.cargo_db['Event'] == wybrany_event) & (st.session_state.cargo_db['Naczepa'] == wybrana_naczepa)
             st.session_state.cargo_db = st.session_state.cargo_db[~mask]
             st.session_state.cargo_db = pd.concat([st.session_state.cargo_db, edited_df], ignore_index=True)
-            
-            st.success("Zmiany zostały zapisane!")
+            st.success("Zmiany zapisane!")
             st.rerun()
+
 
 # ==========================================
 # 6. WIDOK: TARGI (ROZŁADUNEK)
 # ==========================================
 elif st.session_state.app_mode == 'unload':
     with st.sidebar:
-        if st.button("🔙 WRÓĆ DO MENU", use_container_width=True):
-            st.session_state.app_mode = 'menu'
-            st.rerun()
+        if st.button("🔙 WRÓĆ DO MENU", use_container_width=True): st.session_state.app_mode = 'menu'; st.rerun()
             
         st.markdown("---")
         st.markdown("<h3 style='color: white !important;'>📍 LOKALIZACJA</h3>", unsafe_allow_html=True)
@@ -236,8 +228,19 @@ elif st.session_state.app_mode == 'unload':
     
     st.markdown("### 📋 MANIFEST ROZŁADUNKOWY (LIFO)")
     if not df_current_auto.empty:
-        kolumny_do_tabeli = ['Rząd', 'Układ', 'Projekt_1', 'Projekt_2', 'Uwagi']
+        # Tabela uwzględnia teraz zawartość (sprzęt)
+        kolumny_do_tabeli = ['Rząd', 'Układ', 'Projekt_1', 'Zawartosc_1', 'Projekt_2', 'Zawartosc_2', 'Uwagi']
         df_rozladunek = df_current_auto[kolumny_do_tabeli].sort_values(by='Rząd', ascending=False).reset_index(drop=True)
-        st.dataframe(df_rozladunek, use_container_width=True, hide_index=True)
+        
+        # Formatowanie tabeli dla łatwiejszego czytania
+        st.dataframe(
+            df_rozladunek, 
+            use_container_width=True, 
+            hide_index=True,
+            column_config={
+                "Zawartosc_1": st.column_config.TextColumn("Sprzęt (P1)", width="medium"),
+                "Zawartosc_2": st.column_config.TextColumn("Sprzęt (P2)", width="medium"),
+            }
+        )
     else:
         st.warning("Auto jest puste w systemie lub nie dotarło na miejsce.")
