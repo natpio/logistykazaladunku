@@ -52,14 +52,12 @@ wymagane_kolumny = [
 
 if 'cargo_db' not in st.session_state:
     try:
-        # Pobieranie na żywo z chmury (z pominięciem pamięci podręcznej przeglądarki)
         df_sheet = conn.read(worksheet="ZALADUNEK", ttl=0)
         df_sheet = df_sheet.dropna(how='all')
         
         if df_sheet.empty:
             st.session_state.cargo_db = pd.DataFrame(columns=wymagane_kolumny)
         else:
-            # Automatyczna naprawa starych baz (dodawanie brakujących kolumn)
             for kol in wymagane_kolumny:
                 if kol not in df_sheet.columns:
                     df_sheet[kol] = "Nie określono"
@@ -69,7 +67,6 @@ if 'cargo_db' not in st.session_state:
         st.session_state.cargo_db = pd.DataFrame(columns=wymagane_kolumny)
 
 def sync_to_google_sheets():
-    """Funkcja synchronizująca lokalną tabelę z chmurą Google Sheets"""
     try:
         conn.update(worksheet="ZALADUNEK", data=st.session_state.cargo_db)
     except Exception as e:
@@ -100,35 +97,47 @@ kategorie_sprzetu = [
 ]
 
 def get_project_color(project_string):
-    if project_string in ["Brak", "MIX - Drobnica"]:
-        return "#64748b"
+    if project_string in ["Brak", "MIX - Drobnica"]: return "#64748b"
     proj_id = project_string.split(" - ")[0]
     match = st.session_state.projects_db[st.session_state.projects_db['ID'] == str(proj_id)]
-    if not match.empty:
-        return match.iloc[0]['Kolor']
+    if not match.empty: return match.iloc[0]['Kolor']
     return "#64748b"
 
+# --- Funkcja Agregująca Sprzęt (Dla Techników) ---
+def aggregate_equipment(df_auto):
+    summary = []
+    for _, row in df_auto.iterrows():
+        for p_col, z_col in [('Projekt_1', 'Zawartosc_1'), ('Projekt_2', 'Zawartosc_2')]:
+            proj = row[p_col]
+            zaw = row[z_col]
+            if proj != "Brak" and zaw != "Nie określono" and pd.notna(zaw):
+                items = str(zaw).split(", ")
+                for item in items:
+                    parts = item.split(": ")
+                    if len(parts) == 2:
+                        name = parts[0].strip()
+                        try:
+                            qty = int(parts[1].strip())
+                            summary.append({"Projekt": proj, "Sprzęt": name, "Ilość skrzyń": qty})
+                        except ValueError:
+                            pass
+    if summary:
+        df_sum = pd.DataFrame(summary)
+        # Grupowanie i sumowanie
+        df_grouped = df_sum.groupby(["Projekt", "Sprzęt"])["Ilość skrzyń"].sum().reset_index()
+        return df_grouped
+    return pd.DataFrame(columns=["Projekt", "Sprzęt", "Ilość skrzyń"])
+
 # ==========================================
-# 4. SILNIK RENDEROWANIA 3D (Z TEKSTEM NA BLOKACH)
+# 4. SILNIK RENDEROWANIA 3D 
 # ==========================================
 def render_3d_trailer(df_current_auto):
     fig3d = go.Figure()
     W, L, H = 2.45, 13.6, 2.7
     ROW_L = L / 15
 
-    # Rysowanie podłogi naczepy
-    fig3d.add_trace(go.Mesh3d(
-        x=[0, W, W, 0], y=[0, 0, L, L], z=[0, 0, 0, 0], 
-        i=[0, 0], j=[1, 2], k=[2, 3], 
-        color='#334155', opacity=1.0, hoverinfo='skip'
-    ))
-    # Szkielet (Aluminiowe listwy)
-    fig3d.add_trace(go.Scatter3d(
-        x=[0, W, W, 0, 0, 0, W, W, 0, 0], 
-        y=[0, 0, L, L, 0, 0, 0, L, L, 0], 
-        z=[0, 0, 0, 0, 0, H, H, H, H, H], 
-        mode='lines', line=dict(color='#7dd3fc', width=4), hoverinfo='skip'
-    ))
+    fig3d.add_trace(go.Mesh3d(x=[0, W, W, 0], y=[0, 0, L, L], z=[0, 0, 0, 0], i=[0, 0], j=[1, 2], k=[2, 3], color='#334155', opacity=1.0, hoverinfo='skip'))
+    fig3d.add_trace(go.Scatter3d(x=[0, W, W, 0, 0, 0, W, W, 0, 0], y=[0, 0, L, L, 0, 0, 0, L, L, 0], z=[0, 0, 0, 0, 0, H, H, H, H, H], mode='lines', line=dict(color='#7dd3fc', width=4), hoverinfo='skip'))
 
     def draw_block(fig, x_range, y_range, z_range, color, hover_text, label_text):
         x = [x_range[0], x_range[0], x_range[1], x_range[1], x_range[0], x_range[0], x_range[1], x_range[1]]
@@ -136,71 +145,41 @@ def render_3d_trailer(df_current_auto):
         z = [z_range[0], z_range[0], z_range[0], z_range[0], z_range[1], z_range[1], z_range[1], z_range[1]]
         i, j, k = [7, 0, 0, 0, 4, 4, 6, 6, 4, 0, 3, 2], [3, 4, 1, 2, 5, 6, 5, 2, 0, 1, 6, 3], [0, 7, 2, 3, 6, 7, 1, 1, 5, 5, 7, 6]
         
-        # Bryła Skrzyni
-        fig.add_trace(go.Mesh3d(
-            x=x, y=y, z=z, i=i, j=j, k=k, 
-            color=color, opacity=1.0, hoverinfo='text', text=hover_text, 
-            flatshading=True, lighting=dict(ambient=0.8, diffuse=0.9, roughness=0.5, specular=0.2)
-        ))
-
-        # Lewitujący Tekst nad skrzynią (Hologram)
+        fig.add_trace(go.Mesh3d(x=x, y=y, z=z, i=i, j=j, k=k, color=color, opacity=1.0, hoverinfo='text', text=hover_text, flatshading=True, lighting=dict(ambient=0.8, diffuse=0.9, roughness=0.5, specular=0.2)))
         x_center, y_center, z_center = (x_range[0] + x_range[1]) / 2, (y_range[0] + y_range[1]) / 2, z_range[1] + 0.1
-        fig.add_trace(go.Scatter3d(
-            x=[x_center], y=[y_center], z=[z_center], 
-            mode='text', text=[label_text], 
-            textfont=dict(color='white', size=11, family="Arial"), 
-            textposition='middle center', hoverinfo='skip', showlegend=False
-        ))
+        fig.add_trace(go.Scatter3d(x=[x_center], y=[y_center], z=[z_center], mode='text', text=[label_text], textfont=dict(color='white', size=11, family="Arial"), textposition='middle center', hoverinfo='skip', showlegend=False))
 
     def format_zawartosc_3d(zaw):
-        if zaw == "Nie określono" or not zaw: 
-            return ""
+        if zaw == "Nie określono" or not zaw: return ""
+        # Uproszczenie wyświetlania w 3D, by nie robić śmietnika tekstowego
         items = zaw.split(", ")
         if len(items) > 2:
             return f"📦 {items[0]}, {items[1]}..."
         return f"📦 {zaw}"
 
     for idx, row in df_current_auto.iterrows():
-        y_start = (row['Rząd'] - 1) * ROW_L
-        y_end = row['Rząd'] * ROW_L - 0.05 
-        
+        y_start, y_end = (row['Rząd'] - 1) * ROW_L, row['Rząd'] * ROW_L - 0.05 
         p1, p2 = str(row['Projekt_1']), str(row['Projekt_2'])
         z1, z2 = str(row['Zawartosc_1']), str(row['Zawartosc_2'])
         c1, c2 = get_project_color(p1), get_project_color(p2)
         
-        # Wyciągnij samą nazwę projektu do wizualizacji na klocku (bez ID)
         nazwa_p1 = p1.split(" - ")[-1] if " - " in p1 else p1
         nazwa_p2 = p2.split(" - ")[-1] if " - " in p2 else p2
 
         hover_base = f"<b>RZĄD {row['Rząd']}</b><br>Układ: {row['Układ']}<br>Uwagi: {row['Uwagi']}"
-        h_info_1 = f"Projekt: {p1}<br>Sprzęt: {z1}"
-        h_info_2 = f"Projekt: {p2}<br>Sprzęt: {z2}"
+        h_info_1, h_info_2 = f"Projekt: {p1}<br>Sprzęt:<br>{z1.replace(', ', '<br>')}", f"Projekt: {p2}<br>Sprzęt:<br>{z2.replace(', ', '<br>')}"
         
-        lab_1 = f"<b>{nazwa_p1}</b><br>{format_zawartosc_3d(z1)}"
-        lab_2 = f"<b>{nazwa_p2}</b><br>{format_zawartosc_3d(z2)}"
+        lab_1, lab_2 = f"<b>{nazwa_p1}</b><br>{format_zawartosc_3d(z1)}", f"<b>{nazwa_p2}</b><br>{format_zawartosc_3d(z2)}"
 
-        if "Pełny" in row['Układ']: 
-            draw_block(fig3d, [0.05, W-0.05], [y_start, y_end], [0, H*0.8], c1, f"{hover_base}<br>{h_info_1}", lab_1)
+        if "Pełny" in row['Układ']: draw_block(fig3d, [0.05, W-0.05], [y_start, y_end], [0, H*0.8], c1, f"{hover_base}<br>{h_info_1}", lab_1)
         elif "Lewa / Prawa" in row['Układ']:
             draw_block(fig3d, [0.05, W/2-0.05], [y_start, y_end], [0, H*0.8], c1, f"{hover_base}<br>[LEWA] {h_info_1}", lab_1)
-            if p2 != "Brak": 
-                draw_block(fig3d, [W/2+0.05, W-0.05], [y_start, y_end], [0, H*0.8], c2, f"{hover_base}<br>[PRAWA] {h_info_2}", lab_2)
+            if p2 != "Brak": draw_block(fig3d, [W/2+0.05, W-0.05], [y_start, y_end], [0, H*0.8], c2, f"{hover_base}<br>[PRAWA] {h_info_2}", lab_2)
         elif "Dół / Góra" in row['Układ']:
             draw_block(fig3d, [0.05, W-0.05], [y_start, y_end], [0, H*0.4], c1, f"{hover_base}<br>[DÓŁ] {h_info_1}", lab_1)
-            if p2 != "Brak": 
-                draw_block(fig3d, [0.05, W-0.05], [y_start, y_end], [H*0.4+0.05, H*0.8], c2, f"{hover_base}<br>[GÓRA] {h_info_2}", lab_2)
+            if p2 != "Brak": draw_block(fig3d, [0.05, W-0.05], [y_start, y_end], [H*0.4+0.05, H*0.8], c2, f"{hover_base}<br>[GÓRA] {h_info_2}", lab_2)
 
-    fig3d.update_layout(
-        scene=dict(
-            aspectmode='data', 
-            xaxis=dict(visible=False), yaxis=dict(visible=False), zaxis=dict(visible=False), 
-            camera=dict(eye=dict(x=-2.5, y=-1.8, z=1.5))
-        ), 
-        margin=dict(l=0, r=0, t=0, b=0), 
-        height=700, 
-        showlegend=False, 
-        paper_bgcolor='rgba(0,0,0,0)'
-    )
+    fig3d.update_layout(scene=dict(aspectmode='data', xaxis=dict(visible=False), yaxis=dict(visible=False), zaxis=dict(visible=False), camera=dict(eye=dict(x=-2.5, y=-1.8, z=1.5))), margin=dict(l=0, r=0, t=0, b=0), height=700, showlegend=False, paper_bgcolor='rgba(0,0,0,0)')
     return fig3d
 
 # ==========================================
@@ -213,26 +192,18 @@ if st.session_state.app_mode == 'menu':
     
     col1, col2, col3, col4, col5 = st.columns([1, 2, 2, 2, 1])
     with col2:
-        if st.button("👨‍💼 BIURO (LOGISTYKA)", use_container_width=True): 
-            st.session_state.app_mode = 'admin'
-            st.rerun()
+        if st.button("👨‍💼 BIURO (LOGISTYKA)", use_container_width=True): st.session_state.app_mode = 'admin'; st.rerun()
     with col3:
-        if st.button("📦 MAGAZYN (ZAŁADUNEK)", use_container_width=True): 
-            st.session_state.app_mode = 'load'
-            st.rerun()
+        if st.button("📦 MAGAZYN (ZAŁADUNEK)", use_container_width=True): st.session_state.app_mode = 'load'; st.rerun()
     with col4:
-        if st.button("📥 TARGI (ROZŁADUNEK)", use_container_width=True): 
-            st.session_state.app_mode = 'unload'
-            st.rerun()
+        if st.button("📥 TARGI (ROZŁADUNEK)", use_container_width=True): st.session_state.app_mode = 'unload'; st.rerun()
 
 # ==========================================
 # 6. WIDOK: BIURO / LOGISTYKA
 # ==========================================
 elif st.session_state.app_mode == 'admin':
     with st.sidebar:
-        if st.button("🔙 WRÓĆ DO MENU", use_container_width=True): 
-            st.session_state.app_mode = 'menu'
-            st.rerun()
+        if st.button("🔙 WRÓĆ DO MENU", use_container_width=True): st.session_state.app_mode = 'menu'; st.rerun()
         st.markdown("---")
         st.info("MODUŁ PLANOWANIA: Zmiany wprowadzone tutaj zaktualizują słowniki na tabletach w magazynie.")
 
@@ -243,30 +214,22 @@ elif st.session_state.app_mode == 'admin':
     with tab1:
         nowy_event = st.text_input("Dodaj nowy Event:")
         if st.button("➕ Dodaj Event") and nowy_event:
-            if nowy_event not in st.session_state.events_list:
-                st.session_state.events_list.append(nowy_event)
-                st.rerun()
+            if nowy_event not in st.session_state.events_list: st.session_state.events_list.append(nowy_event); st.rerun()
         st.markdown("### Aktualne Eventy:")
         for ev in st.session_state.events_list:
             cols = st.columns([4, 1])
             cols[0].write(f"- {ev}")
-            if cols[1].button("Usuń", key=f"del_ev_{ev}"):
-                st.session_state.events_list.remove(ev)
-                st.rerun()
+            if cols[1].button("Usuń", key=f"del_ev_{ev}"): st.session_state.events_list.remove(ev); st.rerun()
 
     with tab2:
         nowe_auto = st.text_input("Dodaj Auto (Rejestracja):")
         if st.button("➕ Dodaj Auto") and nowe_auto:
-            if nowe_auto not in st.session_state.fleet_list:
-                st.session_state.fleet_list.append(nowe_auto)
-                st.rerun()
+            if nowe_auto not in st.session_state.fleet_list: st.session_state.fleet_list.append(nowe_auto); st.rerun()
         st.markdown("### Aktualna Flota:")
         for auto in st.session_state.fleet_list:
             cols = st.columns([4, 1])
             cols[0].write(f"- {auto}")
-            if cols[1].button("Usuń", key=f"del_auto_{auto}"):
-                st.session_state.fleet_list.remove(auto)
-                st.rerun()
+            if cols[1].button("Usuń", key=f"del_auto_{auto}"): st.session_state.fleet_list.remove(auto); st.rerun()
 
     with tab3:
         with st.form("dodaj_projekt", clear_on_submit=True):
@@ -289,28 +252,21 @@ elif st.session_state.app_mode == 'admin':
             st.rerun()
 
 # ==========================================
-# 7. WIDOK: MAGAZYN (ZAŁADUNEK) Z GOOGLE SHEETS
+# 7. WIDOK: MAGAZYN (ZAŁADUNEK)
 # ==========================================
 elif st.session_state.app_mode == 'load':
     with st.sidebar:
-        if st.button("🔙 WRÓĆ DO MENU", use_container_width=True): 
-            st.session_state.app_mode = 'menu'
-            st.rerun()
+        if st.button("🔙 WRÓĆ DO MENU", use_container_width=True): st.session_state.app_mode = 'menu'; st.rerun()
         
         st.markdown("---")
         st.markdown("<h3 style='color: white !important;'>📍 KONTEKST</h3>", unsafe_allow_html=True)
-        
         wybrany_event = st.selectbox("Wybierz Event:", st.session_state.events_list)
         wybrana_naczepa = st.selectbox("Wybierz Auto:", st.session_state.fleet_list)
         
-        # Filtrowanie projektów na podstawie Eventu
         df_projekty_eventu = st.session_state.projects_db[st.session_state.projects_db['Event'] == wybrany_event]
         dynamiczna_lista_projektow = ["Brak", "MIX - Drobnica"] + [f"{row['ID']} - {row['Nazwa']}" for _, row in df_projekty_eventu.iterrows()]
         
-        df_current_auto = st.session_state.cargo_db[
-            (st.session_state.cargo_db['Event'] == wybrany_event) & 
-            (st.session_state.cargo_db['Naczepa'] == wybrana_naczepa)
-        ]
+        df_current_auto = st.session_state.cargo_db[(st.session_state.cargo_db['Event'] == wybrany_event) & (st.session_state.cargo_db['Naczepa'] == wybrana_naczepa)]
         
         st.markdown("---")
         st.markdown("<h3 style='color: white !important;'>⚡ KREATOR RZĘDU</h3>", unsafe_allow_html=True)
@@ -321,21 +277,38 @@ elif st.session_state.app_mode == 'load':
             
             st.markdown("---")
             p1 = st.selectbox("Projekt Główny / Lewy / Dół:", dynamiczna_lista_projektow)
-            zaw1 = st.multiselect("📦 Sprzęt (P1):", kategorie_sprzetu, placeholder="Wybierz sprzęt...")
+            zaw1 = st.multiselect("📦 Wybierz typy sprzętu (P1):", kategorie_sprzetu)
+            
+            # --- NOWOŚĆ: DYNAMICZNE POLA ILOŚCI DLA P1 ---
+            z1_dict = {}
+            if zaw1:
+                st.caption("Podaj ilość skrzyń/sztuk:")
+                cols1 = st.columns(min(len(zaw1), 4))
+                for i, item in enumerate(zaw1):
+                    z1_dict[item] = cols1[i % 4].number_input(f"{item}", min_value=1, value=1, step=1, key=f"q1_{item}")
             
             if "Pełny" not in uklad:
                 st.markdown("---")
                 p2 = st.selectbox("Projekt Dodatkowy / Prawy / Góra:", dynamiczna_lista_projektow)
-                zaw2 = st.multiselect("📦 Sprzęt (P2):", kategorie_sprzetu, placeholder="Wybierz sprzęt...")
+                zaw2 = st.multiselect("📦 Wybierz typy sprzętu (P2):", kategorie_sprzetu)
+                
+                # --- NOWOŚĆ: DYNAMICZNE POLA ILOŚCI DLA P2 ---
+                z2_dict = {}
+                if zaw2:
+                    st.caption("Podaj ilość skrzyń/sztuk:")
+                    cols2 = st.columns(min(len(zaw2), 4))
+                    for i, item in enumerate(zaw2):
+                        z2_dict[item] = cols2[i % 4].number_input(f"{item}", min_value=1, value=1, step=1, key=f"q2_{item}")
             else:
-                p2, zaw2 = "Brak", []
+                p2, z2_dict = "Brak", {}
 
             st.markdown("---")
             uwagi = st.text_input("Uwagi (opcjonalnie):", placeholder="np. Wózek z boku")
             
             if st.form_submit_button("🔽 DODAJ DO NACZEPY", use_container_width=True):
-                z1_text = ", ".join(zaw1) if zaw1 else "Nie określono"
-                z2_text = ", ".join(zaw2) if zaw2 else "Nie określono"
+                # Sklejanie wyników do formatu "Dioda: 4, TV: 2"
+                z1_text = ", ".join([f"{k}: {v}" for k, v in z1_dict.items()]) if z1_dict else "Nie określono"
+                z2_text = ", ".join([f"{k}: {v}" for k, v in z2_dict.items()]) if z2_dict else "Nie określono"
                 
                 nowe_dane = pd.DataFrame([{
                     'Event': wybrany_event, 'Naczepa': wybrana_naczepa, 
@@ -373,7 +346,6 @@ elif st.session_state.app_mode == 'load':
         if st.button("💾 ZAPISZ KOREKTĘ W BAZIE", type="primary"):
             edited_df['Event'] = wybrany_event
             edited_df['Naczepa'] = wybrana_naczepa
-            
             mask = ~((st.session_state.cargo_db['Event'] == wybrany_event) & (st.session_state.cargo_db['Naczepa'] == wybrana_naczepa))
             st.session_state.cargo_db = st.session_state.cargo_db[mask]
             st.session_state.cargo_db = pd.concat([st.session_state.cargo_db, edited_df], ignore_index=True)
@@ -386,15 +358,11 @@ elif st.session_state.app_mode == 'load':
 # ==========================================
 elif st.session_state.app_mode == 'unload':
     with st.sidebar:
-        if st.button("🔙 WRÓĆ DO MENU", use_container_width=True): 
-            st.session_state.app_mode = 'menu'
-            st.rerun()
-            
+        if st.button("🔙 WRÓĆ DO MENU", use_container_width=True): st.session_state.app_mode = 'menu'; st.rerun()
         st.markdown("---")
         st.markdown("<h3 style='color: white !important;'>📍 LOKALIZACJA</h3>", unsafe_allow_html=True)
         wybrany_event = st.selectbox("Gdzie jesteś?:", st.session_state.events_list)
         wybrana_naczepa = st.selectbox("Które auto rozładowujesz?:", st.session_state.fleet_list)
-        
         st.markdown("---")
         st.info("Tryb Read-Only. W tym trybie nie możesz modyfikować zawartości naczepy.")
 
@@ -410,21 +378,40 @@ elif st.session_state.app_mode == 'unload':
         del st.session_state.cargo_db
         st.rerun()
         
-    st.plotly_chart(render_3d_trailer(df_current_auto), use_container_width=True)
+    # TRZY ZAKŁADKI DLA TECHNIKÓW
+    tab_3d, tab_manifest, tab_podsumowanie = st.tabs(["🧊 WIZUALIZACJA 3D", "📋 MANIFEST (LIFO)", "📊 PODSUMOWANIE SPRZĘTU"])
     
-    st.markdown("### 📋 MANIFEST ROZŁADUNKOWY (LIFO)")
-    if not df_current_auto.empty:
-        kolumny_do_tabeli = ['Rząd', 'Układ', 'Projekt_1', 'Zawartosc_1', 'Projekt_2', 'Zawartosc_2', 'Uwagi']
-        df_rozladunek = df_current_auto[kolumny_do_tabeli].sort_values(by='Rząd', ascending=False).reset_index(drop=True)
-        
-        st.dataframe(
-            df_rozladunek, 
-            use_container_width=True, 
-            hide_index=True,
-            column_config={
-                "Zawartosc_1": st.column_config.TextColumn("Sprzęt (P1)", width="medium"),
-                "Zawartosc_2": st.column_config.TextColumn("Sprzęt (P2)", width="medium")
-            }
-        )
-    else:
-        st.warning("Auto jest puste w systemie lub nie dotarło na miejsce.")
+    with tab_3d:
+        st.plotly_chart(render_3d_trailer(df_current_auto), use_container_width=True)
+    
+    with tab_manifest:
+        if not df_current_auto.empty:
+            kolumny_do_tabeli = ['Rząd', 'Układ', 'Projekt_1', 'Zawartosc_1', 'Projekt_2', 'Zawartosc_2', 'Uwagi']
+            df_rozladunek = df_current_auto[kolumny_do_tabeli].sort_values(by='Rząd', ascending=False).reset_index(drop=True)
+            st.dataframe(
+                df_rozladunek, use_container_width=True, hide_index=True,
+                column_config={"Zawartosc_1": st.column_config.TextColumn("Sprzęt (P1)", width="medium"), "Zawartosc_2": st.column_config.TextColumn("Sprzęt (P2)", width="medium")}
+            )
+        else:
+            st.warning("Auto jest puste w systemie lub nie dotarło na miejsce.")
+            
+    with tab_podsumowanie:
+        if not df_current_auto.empty:
+            st.markdown("### Zsumowane ilości sprzętu na tej naczepie:")
+            df_agregacja = aggregate_equipment(df_current_auto)
+            if not df_agregacja.empty:
+                # Kolorujemy i formatujemy ładnie tabelkę przestawną
+                st.dataframe(
+                    df_agregacja, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={
+                        "Projekt": st.column_config.TextColumn("Projekt Docelowy"),
+                        "Sprzęt": st.column_config.TextColumn("Typ Sprzętu"),
+                        "Ilość skrzyń": st.column_config.NumberColumn("Suma Sztuk/Skrzyń", format="%d szt.")
+                    }
+                )
+            else:
+                st.info("Brak sprzętu do zsumowania (nie podano ilości w magazynie).")
+        else:
+            st.warning("Auto jest puste.")
