@@ -15,7 +15,6 @@ st.markdown("""
     .stApp { background-color: #0f172a; color: #f8fafc; font-family: 'Segoe UI', sans-serif; }
     h1, h2, h3 { color: #38bdf8 !important; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
     
-    /* POPRAWKA 1: Wymuszony biały kolor dla metryk na górze */
     div[data-testid="stMetricValue"] > div { color: #ffffff !important; font-size: 2.2rem !important; font-weight: bold !important; }
     div[data-testid="stMetricLabel"] p { color: #94a3b8 !important; font-size: 1.1rem !important; }
     
@@ -30,7 +29,6 @@ st.markdown("""
     section[data-testid="stSidebar"] { background-color: #1e293b !important; }
     section[data-testid="stSidebar"] label { color: #f8fafc !important; font-weight: 600 !important; }
     
-    /* Kosmetyka tabeli */
     div[data-testid="stDataFrame"] { border-radius: 8px; overflow: hidden; }
     </style>
 """, unsafe_allow_html=True)
@@ -68,7 +66,8 @@ if 'cargo_db' not in st.session_state:
             for kol in WYMAGANE_KOLUMNY:
                 if kol not in df_sheet.columns: df_sheet[kol] = "Nie określono"
             st.session_state.cargo_db = df_sheet
-    except:
+    except Exception as e:
+        st.error(f"Błąd połączenia z Google Sheets: {e}")
         st.session_state.cargo_db = pd.DataFrame(columns=WYMAGANE_KOLUMNY)
 
 if 'events_list' not in st.session_state: st.session_state.events_list = ["Hannover Messe 2026", "ISE Barcelona 2026"]
@@ -101,7 +100,8 @@ def aggregate_equipment(df_auto):
                 for item in val.split(", "):
                     if ": " in item:
                         name, qty = item.split(": ")
-                        summary.append({"Projekt": row['Projekt_1'] if z_col == 'Zawartosc_1' else row['Projekt_2'], "Sprzęt": name.strip(), "Ilość": int(qty.strip())})
+                        proj_val = row['Projekt_1'] if z_col == 'Zawartosc_1' else row['Projekt_2']
+                        summary.append({"Projekt": proj_val, "Sprzęt": name.strip(), "Ilość": int(qty.strip())})
     if summary: return pd.DataFrame(summary).groupby(["Projekt", "Sprzęt"])["Ilość"].sum().reset_index()
     return pd.DataFrame(columns=["Projekt", "Sprzęt", "Ilość"])
 
@@ -128,10 +128,10 @@ def draw_3d(df_auto):
             add_box([0.05, W-0.05], [y_s, y_e], [0, H*0.8], c1, f"{row['Projekt_1']}<br>{row['Zawartosc_1']}", n1)
         elif "Lewa / Prawa" in row['Układ']:
             add_box([0.05, W/2-0.05], [y_s, y_e], [0, H*0.8], c1, f"L: {n1}", n1)
-            if row['Projekt_2'] != "Brak": add_box([W/2+0.05, W-0.05], [y_s, y_e], [0, H*0.8], get_proj_color(row['Projekt_2']), f"P: {row['Projekt_2']}", row['Projekt_2'].split(" - ")[-1])
+            if row['Projekt_2'] != "Brak": add_box([W/2+0.05, W-0.05], [y_s, y_e], [0, H*0.8], get_proj_color(row['Projekt_2']), f"P: {row['Projekt_2']}", str(row['Projekt_2']).split(" - ")[-1])
         elif "Dół / Góra" in row['Układ']:
             add_box([0.05, W-0.05], [y_s, y_e], [0, H*0.4], c1, f"Dół: {n1}", n1)
-            if row['Projekt_2'] != "Brak": add_box([0.05, W-0.05], [y_s, y_e], [H*0.4+0.05, H*0.8], get_proj_color(row['Projekt_2']), f"Góra: {row['Projekt_2']}", row['Projekt_2'].split(" - ")[-1])
+            if row['Projekt_2'] != "Brak": add_box([0.05, W-0.05], [y_s, y_e], [H*0.4+0.05, H*0.8], get_proj_color(row['Projekt_2']), f"Góra: {row['Projekt_2']}", str(row['Projekt_2']).split(" - ")[-1])
 
     fig.update_layout(scene=dict(aspectmode='data', xaxis=dict(visible=False), yaxis=dict(visible=False), zaxis=dict(visible=False), camera=dict(eye=dict(x=-2.5, y=-1.8, z=1.5))), margin=dict(l=0,r=0,t=0,b=0), height=700, showlegend=False, paper_bgcolor='rgba(0,0,0,0)')
     return fig
@@ -150,13 +150,24 @@ elif st.session_state.app_mode == 'admin':
     st.sidebar.button("🔙 POWRÓT", on_click=lambda: st.session_state.update(app_mode='menu'))
     st.title("👨‍💼 PANEL LOGISTYKA")
     t1, t2, t3 = st.tabs(["Eventy", "Flota", "Projekty"])
+    
     with t1:
         ev = st.text_input("Nowy Event:")
-        if st.button("Dodaj") and ev: st.session_state.events_list.append(ev); st.rerun()
+        if st.button("Dodaj") and ev: 
+            if ev not in st.session_state.events_list:
+                st.session_state.events_list.append(ev)
+                st.rerun()
         for ev in st.session_state.events_list:
-            st.write(f"- {ev}")
+            cols = st.columns([4, 1])
+            cols[0].write(f"- {ev}")
+            if cols[1].button("Usuń", key=f"del_ev_{ev}"):
+                st.session_state.events_list.remove(ev)
+                st.rerun()
+                
     with t2:
+        st.markdown("### Aktualna Flota")
         st.session_state.fleet_db = st.data_editor(st.session_state.fleet_db, num_rows="dynamic", use_container_width=True, hide_index=True)
+        
     with t3:
         with st.form("dodaj_projekt", clear_on_submit=True):
             colA, colB = st.columns(2)
@@ -165,13 +176,17 @@ elif st.session_state.app_mode == 'admin':
             p_nazwa = st.text_input("Nazwa Projektu:")
             if st.form_submit_button("Zapisz Projekt w Bazie") and p_event != "Brak" and p_id:
                 nowy_proj = pd.DataFrame([{"Event": p_event, "ID": p_id, "Nazwa": p_nazwa, "Kolor": random.choice(PALETA_KOLOROW)}])
-                st.session_state.projects_db = pd.concat([st.session_state.projects_db, nowy_proj], ignore_index=True); st.rerun()
+                st.session_state.projects_db = pd.concat([st.session_state.projects_db, nowy_proj], ignore_index=True)
+                st.rerun()
+        st.markdown("### Aktualne Projekty")
         st.session_state.projects_db = st.data_editor(st.session_state.projects_db, num_rows="dynamic", use_container_width=True, hide_index=True)
 
 elif st.session_state.app_mode == 'load':
     st.sidebar.button("🔙 POWRÓT", on_click=lambda: st.session_state.update(app_mode='menu'))
+    
     if not st.session_state.events_list:
-        st.warning("Skonfiguruj biuro."); st.stop()
+        st.warning("Skonfiguruj biuro (brak eventów).")
+        st.stop()
         
     ev_sel = st.sidebar.selectbox("Event:", st.session_state.events_list)
     auta = st.session_state.fleet_db[st.session_state.fleet_db['Event'] == ev_sel]['Auto'].tolist() if not st.session_state.fleet_db.empty else []
@@ -180,58 +195,100 @@ elif st.session_state.app_mode == 'load':
         auto_sel = st.sidebar.selectbox("Auto:", auta)
         df_c = st.session_state.cargo_db[(st.session_state.cargo_db['Event'] == ev_sel) & (st.session_state.cargo_db['Naczepa'] == auto_sel)]
         
-        rz = st.sidebar.number_input("Rząd:", value=len(df_c)+1)
+        st.sidebar.markdown("### ⚡ KREATOR RZĘDU")
+        rz = st.sidebar.number_input("Rząd (od kabiny):", min_value=1, max_value=15, value=len(df_c)+1)
         uk = st.sidebar.selectbox("Układ:", UKLADY_LISTA)
+        
         projs = ["Brak", "MIX - Drobnica"] + [f"{r['ID']} - {r['Nazwa']}" for _, r in st.session_state.projects_db[st.session_state.projects_db['Event']==ev_sel].iterrows()]
         
         st.sidebar.markdown("---")
-        p1 = st.sidebar.selectbox("Projekt Główny / Lewy / Dół:", projs)
+        p1 = st.sidebar.selectbox("Projekt 1 (Główny / Lewy / Dół):", projs)
         z1_s = st.sidebar.multiselect("Sprzęt 1:", KATEGORIE_SPRZETU)
         z1_qty = {s: st.sidebar.number_input(f"Ilość {s}:", min_value=1, key=f"q1_{s}") for s in z1_s}
         
         p2, z2_qty = "Brak", {}
         if "Pełny" not in uk:
             st.sidebar.markdown("---")
-            p2 = st.sidebar.selectbox("Projekt 2:", projs)
+            p2 = st.sidebar.selectbox("Projekt 2 (Dodatkowy / Prawy / Góra):", projs)
             z2_s = st.sidebar.multiselect("Sprzęt 2:", KATEGORIE_SPRZETU)
             z2_qty = {s: st.sidebar.number_input(f"Ilość {s}:", min_value=1, key=f"q2_{s}") for s in z2_s}
             
-        uw = st.sidebar.text_input("Uwagi:")
+        st.sidebar.markdown("---")
+        uw = st.sidebar.text_input("Uwagi (opcjonalnie):", placeholder="np. Wózek z boku")
+        
         if st.sidebar.button("🔽 DODAJ DO NACZEPY", use_container_width=True):
-            z1_t = ", ".join([f"{k}: {v}" for k,v in z1_qty.items()]); z2_t = ", ".join([f"{k}: {v}" for k,v in z2_qty.items()])
+            z1_t = ", ".join([f"{k}: {v}" for k,v in z1_qty.items()]) if z1_qty else "Nie określono"
+            z2_t = ", ".join([f"{k}: {v}" for k,v in z2_qty.items()]) if z2_qty else "Nie określono"
+            
             row = pd.DataFrame([{'Event':ev_sel,'Naczepa':auto_sel,'Rząd':rz,'Układ':uk,'Projekt_1':p1,'Zawartosc_1':z1_t,'Projekt_2':p2,'Zawartosc_2':z2_t,'Uwagi':uw}])
-            st.session_state.cargo_db = pd.concat([st.session_state.cargo_db, row], ignore_index=True); sync_db(); st.rerun()
+            st.session_state.cargo_db = pd.concat([st.session_state.cargo_db, row], ignore_index=True)
+            sync_db()
+            st.rerun()
+            
+        if not df_c.empty:
+            if st.sidebar.button("↩️ COFNIJ OSTATNI RZĄD", use_container_width=True):
+                st.session_state.cargo_db = st.session_state.cargo_db.drop(df_c.index[-1])
+                sync_db()
+                st.rerun()
 
         st.title(f"📦 ZAŁADUNEK: {auto_sel}")
         c1, c2, c3 = st.columns(3)
         c1.metric("Przestrzeń LDM", f"{len(df_c['Rząd'].unique())} / 15")
         c2.metric("Ostatni rząd", f"Rząd {len(df_c['Rząd'].unique())}" if not df_c.empty else "Brak")
-        if c3.button("🔄 POBIERZ Z CHMURY (Odśwież)"): del st.session_state.cargo_db; st.rerun()
+        if c3.button("🔄 POBIERZ Z CHMURY (Odśwież)"): 
+            del st.session_state.cargo_db
+            st.rerun()
         
         st.plotly_chart(draw_3d(df_c), use_container_width=True)
         
         with st.expander("🛠️ TRYB KOREKTY"):
-            # POPRAWKA 2: Dodano hide_index=True do edytora danych
             edited_df = st.data_editor(df_c.drop(columns=['Event', 'Naczepa']), num_rows="dynamic", use_container_width=True, hide_index=True)
             if st.button("💾 ZAPISZ KOREKTĘ", type="primary"):
-                edited_df['Event'] = ev_sel; edited_df['Naczepa'] = auto_sel
+                edited_df['Event'] = ev_sel
+                edited_df['Naczepa'] = auto_sel
                 st.session_state.cargo_db = st.session_state.cargo_db[~((st.session_state.cargo_db['Event'] == ev_sel) & (st.session_state.cargo_db['Naczepa'] == auto_sel))]
                 st.session_state.cargo_db = pd.concat([st.session_state.cargo_db, edited_df], ignore_index=True)
-                sync_db(); st.rerun()
-    else: st.warning("Brak aut dla tego eventu.")
+                sync_db()
+                st.success("Zapisano!")
+                st.rerun()
+    else: 
+        st.title("📦 ZAŁADUNEK")
+        st.warning("Brak aut przypisanych do tego eventu. Dodaj je w panelu Biuro.")
 
 elif st.session_state.app_mode == 'unload':
     st.sidebar.button("🔙 POWRÓT", on_click=lambda: st.session_state.update(app_mode='menu'))
+    
+    if not st.session_state.events_list:
+        st.warning("Brak eventów."); st.stop()
+        
     ev_sel = st.sidebar.selectbox("Event:", st.session_state.events_list)
     auta = st.session_state.fleet_db[st.session_state.fleet_db['Event'] == ev_sel]['Auto'].tolist() if not st.session_state.fleet_db.empty else []
     
     if auta:
         auto_sel = st.sidebar.selectbox("Auto:", auta)
-        if st.sidebar.button("🔄 ODSWIEŻ"): st.session_state.pop('cargo_db', None); st.rerun()
+        if st.sidebar.button("🔄 ODSWIEŻ DANE"): 
+            st.session_state.pop('cargo_db', None)
+            st.rerun()
+            
         df_c = st.session_state.cargo_db[(st.session_state.cargo_db['Event'] == ev_sel) & (st.session_state.cargo_db['Naczepa'] == auto_sel)]
         
         st.title(f"📥 ROZŁADUNEK: {auto_sel}")
         t1, t2, t3 = st.tabs(["Widok 3D", "Manifest LIFO", "Podsumowanie"])
-        with t1: st.plotly_chart(draw_3d(df_c), use_container_width=True)
-        with t2: st.dataframe(df_c.sort_values("Rząd", ascending=False), hide_index=True, use_container_width=True)
-        with t3: st.dataframe(aggregate_equipment(df_c), use_container_width=True, hide_index=True)
+        
+        with t1: 
+            st.plotly_chart(draw_3d(df_c), use_container_width=True)
+            
+        with t2: 
+            if not df_c.empty:
+                st.dataframe(df_c[['Rząd', 'Układ', 'Projekt_1', 'Zawartosc_1', 'Projekt_2', 'Zawartosc_2', 'Uwagi']].sort_values("Rząd", ascending=False), hide_index=True, use_container_width=True)
+            else:
+                st.info("Naczepa jest pusta.")
+                
+        with t3: 
+            if not df_c.empty:
+                st.dataframe(aggregate_equipment(df_c), use_container_width=True, hide_index=True)
+            else:
+                st.info("Naczepa jest pusta.")
+    else: 
+        st.title("📥 ROZŁADUNEK")
+        st.warning("Brak aut dla tego eventu.")
